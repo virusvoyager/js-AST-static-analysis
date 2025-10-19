@@ -60,10 +60,9 @@ By using these features, you can dissect the structure and potential behavior of
 
 2.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git)
+    git clone [https://github.com/virusvoyager/js-AST-static-analysis.git](https://github.com/virusvoyager/js-AST-static-analysis.git)
     cd YOUR_REPO_NAME
     ```
-    *(Replace `YOUR_USERNAME` and `YOUR_REPO_NAME` with your actual details)*
 
 3.  **Build the Docker Image:**
     From within the project directory (e.g., `js-AST-static-analysis`), run:
