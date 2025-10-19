@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  deobfuscator:
+    build: .
+    image: js-deobfuscator
+    volumes:
+      # Keep mounting the current directory to /data
+      - .:/data
+    working_dir: /app # Matches Dockerfile
+    environment:
+      # Pass the absolute path of the viewer HTML on the host
+      # Docker Compose automatically replaces ${PWD} with the current working directory
+      # Make sure the filename matches your viewer HTML file!
+      - VIEWER_HOST_PATH=${PWD}/AST-viewer.html # <--- ADJUST FILENAME IF NEEDED
+    entrypoint: ["node", "/app/deobfuscator.js"] # Input file path will be appended

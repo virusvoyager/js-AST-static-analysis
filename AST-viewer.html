@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Code-to-Graph AST Viewer v3</title>
+    <style>
+        /* ... (Keep all previous CSS styles) ... */
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        h1 { text-align: center; margin: 10px 0; color: #333; }
+        #container { display: flex; flex-grow: 1; border-top: 2px solid #ccc; height: calc(100vh - 40px); }
+        #input-pane { flex: 0 0 30%; padding: 10px; overflow: auto; position: relative; box-sizing: border-box; border-right: 2px solid #ccc; display: flex; flex-direction: column; }
+        #output-pane { flex: 1; position: relative; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; }
+        textarea { flex-grow: 1; width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-family: "Courier New", monospace; font-size: 14px; margin-bottom: 10px; }
+        button { display: block; width: 100%; padding: 10px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #graph-container { flex-grow: 1; position: relative; }
+        #graph-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .node circle { stroke-width: 2px; cursor: pointer; }
+        .node-function { fill: #20c997; stroke: #1a9c74; } .node-if, .node-try { fill: #6f42c1; stroke: #59369a; }
+        .node-loop { fill: #ffc107; stroke: #d39e00; } .node-return { fill: #343a40; stroke: #000; }
+        .node-consequent, .node-try-block { fill: #d4edda; stroke: #28a745; } .node-alternate, .node-catch { fill: #f8d7da; stroke: #dc3545; }
+        .node-expanded { fill: #fff; stroke: steelblue; } .node-collapsed { fill: steelblue; stroke: steelblue; } .node-leaf { fill: #ccc; stroke: #999; }
+        .node text { font: 12px sans-serif; cursor: pointer; stroke: #fff; stroke-width: 3px; paint-order: stroke; }
+        .node text.dimmed { fill: #ccc; } .node text.highlighted { fill: #d9534f; font-weight: bold; }
+        .link { fill: none; stroke: #ccc; stroke-width: 2px; }
+        #legend { padding: 5px 10px; font-size: 10px; background-color: #f8f9fa; border-top: 1px solid #ccc; display: flex; flex-wrap: wrap; gap: 10px; }
+        .legend-item { display: flex; align-items: center; } .legend-color { width: 12px; height: 12px; border: 1px solid #666; margin-right: 4px; }
+        #confirm-modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); justify-content: center; align-items: center; }
+        .modal-content { background-color: #fefefe; margin: auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 5px; text-align: center; }
+        .modal-buttons button { display: inline-block; width: auto; padding: 8px 20px; margin: 10px 5px 0 5px; font-size: 14px; }
+        #confirm-yes { background-color: #28a745; } #confirm-yes:hover { background-color: #218838; }
+        #confirm-no { background-color: #dc3545; } #confirm-no:hover { background-color: #c82333; }
+        .node circle.flash { animation: flash-yellow 1.5s ease-out; }
+        @keyframes flash-yellow { 0% { fill: yellow; } 100% { /* Final color is set by getNodeClass */ } }
+    </style>
+</head>
+<body>
+
+    <h1>Code-to-Graph AST Viewer v3 (Auto-Load)</h1>
+
+    <div id="container">
+        <div id="input-pane">
+            <textarea id="js-input" placeholder="Paste your JavaScript code here..." onclick="findNodeInGraph()"></textarea>
+            <button onclick="parseAndDraw()">Generate Graph</button>
+        </div>
+        <div id="output-pane">
+             <div id="graph-container"> <svg id="graph-svg"></svg>
+             </div>
+             <div id="legend"> <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span>Function</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #6f42c1;"></span>If / Try</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #d4edda; border-color: #28a745;"></span>True / Try Block</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #f8d7da; border-color: #dc3545;"></span>False / Catch</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #ffc107;"></span>Loop</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #343a40;"></span>Return</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: steelblue;"></span>Collapsed</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #fff; border-color: steelblue;"></span>Expanded</div>
+                 <div class="legend-item"><span class="legend-color" style="background-color: #ccc;"></span>Leaf</div>
+             </div>
+             </div>
+    </div>
+
+    <div id="confirm-modal">
+        <div class="modal-content">
+            <p id="confirm-message">Focus view? (Collapse irrelevant branches)</p>
+            <div class="modal-buttons">
+                <button id="confirm-yes">Yes</button>
+                <button id="confirm-no">No</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="esprima.js"></script>
+    <script src="d3.v7.min.js"></script>
+
+    <script>
+        // ... (Keep ALL the existing global variables and functions:
+        //      svg, g, zoom, treeLayout, rootNode, esprimaAST, etc.
+        //      parseAndDraw, getNodeLabel, getNodeClass, getMatchableValue,
+        //      isMatch, locToIndex, handleMouseOver, handleMouseOut,
+        //      revealMatchingBranches, collapseNonMatchingBranches, hasMatchInChildren,
+        //      confirmResolve, showConfirmModal, hideConfirmModal, update, click,
+        //      findASTNodeAt, findD3NodeForASTNode, centerOnNode, findNodeInGraph
+        // ) ...
+        // Global variables
+        let svg, g, zoom, treeLayout, rootNode, esprimaAST;
+        let nodeCounter = 0;
+        const duration = 750;
+        let lineEndings = [];
+
+        function parseAndDraw() { /* ... Same as before ... */
+            const codeInput = document.getElementById('js-input').value;
+            const svgElement = d3.select("#graph-svg");
+            svgElement.selectAll("*").remove();
+
+            if (!codeInput) { svgElement.append("text").attr("x", 20).attr("y", 40).text("Error: Please paste some JavaScript code first."); return; }
+
+            lineEndings = [-1]; for (let i = 0; i < codeInput.length; i++) { if (codeInput[i] === '\n') lineEndings.push(i); }
+
+            try { esprimaAST = esprima.parseScript(codeInput, { range: true, loc: true }); }
+            catch (e) { svgElement.append("text").attr("x", 20).attr("y", 40).text("Error parsing JavaScript: " + e.message); return; }
+
+            const graphContainer = document.getElementById('graph-container');
+            const height = graphContainer.clientHeight;
+            treeLayout = d3.tree().nodeSize([40, 250]);
+            g = svgElement.append("g");
+            zoom = d3.zoom().scaleExtent([0.1, 5]).on('zoom', (event) => g.attr('transform', event.transform));
+            svgElement.call(zoom);
+
+            rootNode = d3.hierarchy(esprimaAST, d => {
+                const children = [];
+                for (const key in d) {
+                    if (!d.hasOwnProperty(key) || key === 'range' || key === 'loc' || d[key] === null) continue;
+                    const value = d[key];
+                    if (typeof value === 'object') {
+                        if (Array.isArray(value)) value.forEach((item, index) => { if (typeof item === 'object' && item !== null) children.push({ ...item, _key: `[${index}]` }); });
+                        else children.push({ ...value, _key: key });
+                    }
+                }
+                return children.length ? children : null;
+            });
+
+            rootNode.x0 = height / 2; rootNode.y0 = 0;
+            rootNode.descendants().forEach(d => { if (d.depth > 1) { d._children = d.children; d.children = null; } });
+            update(rootNode);
+            svgElement.call(zoom.transform, d3.zoomIdentity.translate(150, height / 2).scale(0.7));
+        }
+        function getNodeLabel(d) { /* ... Same as before ... */ const data = d.data; let label = data.type || "Root"; if (data.type === "Identifier") label += `: ${data.name}`; else if (data.type === "Literal") label += `: ${JSON.stringify(data.value)}`; else if (data.type === "BinaryExpression" || data.type === "AssignmentExpression" || data.type === "UpdateExpression") label += ` (${data.operator})`; if (data._key === 'consequent') label = `consequent (true): ${label}`; else if (data._key === 'alternate') label = `alternate (false): ${label}`; else if (data._key === 'block' && d.parent && d.parent.data.type === 'TryStatement') label = `try-block: ${label}`; else if (data._key === 'handler' && d.parent && d.parent.data.type === 'TryStatement') label = `catch-handler: ${label}`; else if (data._key) label = `${data._key}: ${label}`; return label; }
+        function getNodeClass(d) { /* ... Same as before ... */ const type = d.data.type; const key = d.data._key; if (key === 'consequent') return 'node-consequent'; if (key === 'alternate') return 'node-alternate'; if (key === 'block' && d.parent && d.parent.data.type === 'TryStatement') return 'node-try-block'; if (key === 'handler' && d.parent && d.parent.data.type === 'TryStatement') return 'node-catch'; if (type === 'FunctionDeclaration' || type === 'FunctionExpression' || type === 'ArrowFunctionExpression') return 'node-function'; if (type === 'IfStatement') return 'node-if'; if (type === 'TryStatement') return 'node-try'; if (type === 'ForStatement' || type === 'WhileStatement' || type === 'DoWhileStatement' || type === 'ForInStatement') return 'node-loop'; if (type === 'ReturnStatement') return 'node-return'; if (d._children) return 'node-collapsed'; if (d.children) return 'node-expanded'; return 'node-leaf'; }
+        function getMatchableValue(d) { /* ... Same as before ... */ if (d.data.type === 'Identifier') return { type: 'name', value: d.data.name }; if (d.data.type === 'Literal') return { type: 'value', value: d.data.value }; return null; }
+        function isMatch(d, matchInfo) { /* ... Same as before ... */ if (!matchInfo) return false; if (matchInfo.type === 'name' && d.data.type === 'Identifier') return d.data.name === matchInfo.value; if (matchInfo.type === 'value' && d.data.type === 'Literal') return d.data.value === matchInfo.value; return false; }
+        function locToIndex(loc) { /* ... Same as before ... */ if (!loc || !loc.line || !loc.column) return -1; const lineIndex = loc.line - 1; const colIndex = loc.column; if (lineIndex >= lineEndings.length) return -1; return lineEndings[lineIndex] + 1 + colIndex; }
+        function handleMouseOver(event, d) { /* ... Same as before ... */ const matchInfo = getMatchableValue(d); if (matchInfo) { g.selectAll('.node text').classed('dimmed', true).classed('highlighted', other_d => isMatch(other_d, matchInfo)); } const loc = d.data.loc; const textarea = document.getElementById('js-input'); if (loc && loc.start && loc.end) { const startIndex = locToIndex(loc.start); const endIndex = locToIndex(loc.end); if (startIndex !== -1 && endIndex !== -1) { textarea.focus(); textarea.setSelectionRange(startIndex, endIndex); } } }
+        function handleMouseOut(event, d) { /* ... Same as before ... */ g.selectAll('.node text').classed('dimmed', false).classed('highlighted', false); const textarea = document.getElementById('js-input'); textarea.setSelectionRange(0, 0); /* textarea.blur(); */ }
+        function revealMatchingBranches(node, matchInfo) { /* ... Same as before ... */ let foundMatch = isMatch(node, matchInfo); const children = node.children || node._children; if (children) { let branchHasMatch = false; children.forEach(child => { if (revealMatchingBranches(child, matchInfo)) branchHasMatch = true; }); if (branchHasMatch && node._children) { node.children = node._children; node._children = null; } foundMatch = foundMatch || branchHasMatch; } return foundMatch; }
+        function collapseNonMatchingBranches(node, matchInfo) { /* ... Same as before ... */ const children = node.children; if (children) { children.forEach(child => { if (hasMatchInChildren(child, matchInfo)) collapseNonMatchingBranches(child, matchInfo); else { if (child.children) { child._children = child.children; child.children = null; } else if (child._children) child.children = null; } }); } }
+        function hasMatchInChildren(node, matchInfo) { /* ... Same as before ... */ if (isMatch(node, matchInfo)) return true; const children = node.children || node._children; if (children) { for (let i = 0; i < children.length; i++) { if (hasMatchInChildren(children[i], matchInfo)) return true; } } return false; }
+        let confirmResolve = null; function showConfirmModal(message) { /* ... Same as before ... */ return new Promise((resolve) => { confirmResolve = resolve; document.getElementById('confirm-message').textContent = message; document.getElementById('confirm-modal').style.display = 'flex'; }); } function hideConfirmModal() { /* ... Same as before ... */ document.getElementById('confirm-modal').style.display = 'none'; } document.getElementById('confirm-yes').addEventListener('click', () => { hideConfirmModal(); if (confirmResolve) confirmResolve(true); }); document.getElementById('confirm-no').addEventListener('click', () => { hideConfirmModal(); if (confirmResolve) confirmResolve(false); });
+        function update(source, centerNode = null) { /* ... Same as before ... */ const layoutData = treeLayout(rootNode); const nodes = layoutData.descendants(); const links = layoutData.links(); const node = g.selectAll('g.node').data(nodes, d => d.id || (d.id = ++nodeCounter)); const nodeEnter = node.enter().append('g').attr('class', 'node').attr('transform', d => `translate(${source.y0 || rootNode.y0},${source.x0 || rootNode.x0})`).on('click', click).on('mouseover', handleMouseOver).on('mouseout', handleMouseOut); nodeEnter.append('circle').attr('r', 10).attr('class', d => getNodeClass(d)); nodeEnter.append('text').attr('dy', '.35em').attr('x', d => d.children || d._children ? -13 : 13).attr('text-anchor', d => d.children || d._children ? 'end' : 'start').text(d => getNodeLabel(d)); const nodeUpdate = nodeEnter.merge(node); nodeUpdate.transition().duration(duration).attr('transform', d => `translate(${d.y},${d.x})`); nodeUpdate.select('circle').transition().duration(duration / 2).attr('r', 10).attr('class', d => getNodeClass(d)); nodeUpdate.select('text').attr('x', d => d.children || d._children ? -13 : 13).attr('text-anchor', d => d.children || d._children ? 'end' : 'start').text(d => getNodeLabel(d)); const nodeExit = node.exit().transition().duration(duration).attr('transform', d => `translate(${source.y},${source.x})`).remove(); nodeExit.select('circle').attr('r', 1e-6); nodeExit.select('text').style('fill-opacity', 1e-6); const link = g.selectAll('path.link').data(links, d => d.target.id); const linkGenerator = d3.linkHorizontal().x(d => d.y).y(d => d.x); const linkEnter = link.enter().insert('path', 'g').attr('class', 'link').attr('d', d => { const o = { x: source.x0 || rootNode.x0, y: source.y0 || rootNode.y0 }; return linkGenerator({ source: o, target: o }); }); const linkUpdate = linkEnter.merge(link); linkUpdate.transition().duration(duration).attr('d', linkGenerator); link.exit().transition().duration(duration).attr('d', d => { const o = { x: source.x, y: source.y }; return linkGenerator({ source: o, target: o }); }).remove(); nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; }); if (centerNode) { centerOnNode(centerNode); } }
+        async function click(event, d) { /* ... Same as before ... */ const matchInfo = getMatchableValue(d); if (matchInfo) { const shouldCollapse = await showConfirmModal("Focus view? (Collapse irrelevant branches)"); revealMatchingBranches(rootNode, matchInfo); if (shouldCollapse) { collapseNonMatchingBranches(rootNode, matchInfo); } update(d); } else { if (d.children) { d._children = d.children; d.children = null; } else { d.children = d._children; d._children = null; } update(d); } }
+        function findASTNodeAt(node, index) { /* ... Same as before ... */ if (!node || !node.range || !(node.range[0] <= index && index < node.range[1])) { return null; } let bestMatch = node; for (const key in node) { if (!node.hasOwnProperty(key) || key === 'range' || key === 'loc' || node[key] === null) continue; const value = node[key]; if (typeof value === 'object') { if (Array.isArray(value)) { for (const item of value) { if (typeof item === 'object' && item !== null) { const childMatch = findASTNodeAt(item, index); if (childMatch) { bestMatch = childMatch; } } } } else { if (typeof value === 'object' && value !== null) { const childMatch = findASTNodeAt(value, index); if (childMatch) { bestMatch = childMatch; } } } } } return bestMatch; }
+        function findD3NodeForASTNode(astNode) { /* ... Same as before ... */ if (!rootNode || !astNode || !astNode.range) return null; return rootNode.descendants().find(d => d.data.range && d.data.range[0] === astNode.range[0] && d.data.range[1] === astNode.range[1]); }
+        function centerOnNode(d3Node) { /* ... Same as before ... */ if (!d3Node || !svg || !zoom) return; const svgElement = svg.node(); if (!svgElement) return; const width = svgElement.clientWidth; const height = svgElement.clientHeight; const currentTransform = d3.zoomTransform(svgElement); if (d3Node.y === undefined || d3Node.x === undefined) return; const targetX = width / 2 - d3Node.y * currentTransform.k; const targetY = height / 2 - d3Node.x * currentTransform.k; svg.transition().duration(duration).call(zoom.transform, d3.zoomIdentity.translate(targetX, targetY).scale(currentTransform.k)); }
+
+        // --- Code-to-Graph Interaction ---
+        function findNodeInGraph() {
+            if (!esprimaAST || !rootNode) { console.log("Graph not generated yet."); return; }
+
+            const textarea = document.getElementById('js-input');
+            const clickIndex = textarea.selectionStart;
+
+            const targetASTNode = findASTNodeAt(esprimaAST, clickIndex);
+            if (!targetASTNode) { console.log("No AST node found at index:", clickIndex); return; }
+
+            const targetD3Node = findD3NodeForASTNode(targetASTNode);
+            if (!targetD3Node) { console.log("No D3 node found for AST node:", targetASTNode); return; }
+
+            console.log("Found D3 node:", targetD3Node);
+
+            // --- FIX 2: Correct Reveal Logic ---
+            // Reveal the path *before* calling update by manipulating the hierarchy data
+            let sourceNodeForAnimation = rootNode; // Start animation from root by default
+            const ancestors = targetD3Node.ancestors(); // Get path from target up to root
+            ancestors.forEach(ancestor => {
+                if (ancestor._children) {
+                    ancestor.children = ancestor._children;
+                    ancestor._children = null;
+                     // Set the source for animation to the node *just above* the first revealed node
+                     // This prevents the whole tree from collapsing and re-expanding jarringly
+                     sourceNodeForAnimation = ancestor;
+                }
+            });
+            // --- END FIX 2 ---
+
+
+            // Update the graph, originating animation from the determined source
+            update(sourceNodeForAnimation, targetD3Node); // Pass target to center
+
+            // Flash the target node
+             setTimeout(() => {
+                 const targetElement = g.selectAll('g.node').filter(d => d === targetD3Node);
+                 if (!targetElement.empty()) {
+                     targetElement.select('circle').classed('flash', true)
+                         .on('animationend.flash', function() { d3.select(this).classed('flash', false).on('.flash', null); });
+                 } else { console.log("Target node element not found for flashing after update."); }
+             }, duration + 50); // Wait for D3 transition
+        }
+
+
+        // --- NEW: Auto-Load from Hash on Page Load ---
+        window.onload = function() {
+            // Add event listeners for modal buttons here to ensure they exist
+            document.getElementById('confirm-yes').addEventListener('click', () => { hideConfirmModal(); if (confirmResolve) confirmResolve(true); });
+            document.getElementById('confirm-no').addEventListener('click', () => { hideConfirmModal(); if (confirmResolve) confirmResolve(false); });
+
+
+            if (window.location.hash && window.location.hash.length > 1) {
+                try {
+                    // Get code from hash, remove '#' and decode
+                    const encodedCode = window.location.hash.substring(1);
+                    const decodedCode = decodeURIComponent(encodedCode);
+
+                    // Put code in textarea
+                    document.getElementById('js-input').value = decodedCode;
+
+                    // Automatically generate graph
+                    parseAndDraw();
+                    console.log("Code loaded from URL hash and graph generated.");
+
+                } catch (e) {
+                    console.error("Error decoding or parsing code from URL hash:", e);
+                    // Optionally clear the hash or show an error message
+                    document.getElementById('js-input').value = "Error loading code from URL.";
+                }
+            } else {
+                console.log("No code found in URL hash.");
+            }
+        };
+        // --- END Auto-Load ---
+
+    </script>
+</body>
+</html>
