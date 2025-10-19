@@ -32,6 +32,8 @@ Static analysis means examining code without running it. The AST graph is a powe
 
 By using these features, you can dissect the structure and potential behavior of obfuscated JavaScript statically, significantly speeding up the analysis process compared to just reading the raw, confusing code.
 
+![AST Viewer Screenshot](./ast-viewer-screenshot.png)
+
 ---
 
 ## Features ✨
