@@ -61,7 +61,7 @@ By using these features, you can dissect the structure and potential behavior of
 2.  **Clone the Repository:**
     ```bash
     git clone [https://github.com/virusvoyager/js-AST-static-analysis.git](https://github.com/virusvoyager/js-AST-static-analysis.git)
-    cd YOUR_REPO_NAME
+    cd js-AST-static-analysis
     ```
 
 3.  **Build the Docker Image:**
