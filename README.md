@@ -60,7 +60,7 @@ By using these features, you can dissect the structure and potential behavior of
 
 2.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/virusvoyager/js-AST-static-analysis.git](https://github.com/virusvoyager/js-AST-static-analysis.git)
+    git clone https://github.com/virusvoyager/js-AST-static-analysis.git
     cd js-AST-static-analysis
     ```
 
